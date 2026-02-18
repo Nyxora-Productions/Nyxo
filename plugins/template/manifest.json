@@ -1,14 +1,15 @@
 {
-    "name": "Bemmo",
-    "description": "A self-bot plugin",
-    "authors": [
-        {
-            "name": "ChatGPT",
-            "id": "1180328592247090278"
-        }
-    ],
-    "main": "src/index.ts",
-    "vendetta": {
-        "icon": "PaperPlusIcon"
-    }
+	"name": "Nyxo",
+	"description": "The ultimate self-bot utility for Revenge.",
+	"authors": [
+		{
+			"name": "Pepe",
+			"id": "1180328592247090278"
+		}
+	],
+	"main": "src/index.ts",
+	"version": "1.1.0",
+	"vendetta": {
+		"icon": "ic_message_retry"
+	}
 }
