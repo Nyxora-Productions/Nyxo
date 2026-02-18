@@ -1,7 +1,6 @@
 import { logger } from "@vendetta";
 import Settings from "./Settings";
 import GiveawaySection from "./GiveawaySection";
-
 import { registerCommand } from "@vendetta/commands";
 import { findByProps, findByStoreName, findByTypeName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
@@ -11,135 +10,84 @@ import { after } from "@vendetta/patcher";
 const MessageActions = findByProps("sendMessage", "editMessage");
 const UserStore = findByStoreName("UserStore");
 const ChannelStore = findByProps("getChannel");
-
-// expanded to include GET for mass-delete
-const HTTP = findByProps("get", "del", "post", "put");
-
-const commands: (() => void)[] = [];
-
+const HTTP = findByProps("get", "del", "post", "put", "patch");
 const { receiveMessage } = findByProps("receiveMessage");
 const { createBotMessage } = findByProps("createBotMessage");
 
-const getRandomNumber = () => Math.floor(Math.random() * 100);
+const commands: (() => void)[] = [];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function sleep(ms: number) {
-return new Promise(resolve => setTimeout(resolve, ms));
-}
+const sendBotMsg = (chanId: string, content: string) =>
+  receiveMessage(
+    chanId,
+    Object.assign(createBotMessage({ channelId: chanId, content }), {
+      author: UserStore.getCurrentUser(),
+    })
+  );
 
-function getConfiguredWords() {
-if (!Array.isArray(storage.words)) return [];
-return storage.words.filter(w => typeof w === "string" && w.trim().length);
-}
+const sendRealMsg = (chanId: string, content: string) =>
+  MessageActions.sendMessage(chanId, { content }, void 0, {
+    nonce: Date.now().toString(),
+  });
+
+const getVal = (args: any[], name: string) =>
+  args.find((a) => a.name === name)?.value;
 
 function randomWord() {
-const words = getConfiguredWords();
-if (!words.length) return "### (no spam messages configured)";
-return words[Math.floor(Math.random() * words.length)];
+  const words = (storage.words || []).filter(
+    (w: any) => typeof w === "string" && w.trim().length
+  );
+  return words.length
+    ? words[Math.floor(Math.random() * words.length)]
+    : "### (no spam messages configured)";
 }
 
-// ---- /raid ----
 commands.push(
-registerCommand({
-name: "raid",
-displayName: "raid",
-description: "Start a raid",
-options: [
-{ name: "amount", displayName: "amount", description: "Number of times to send", required: true, type: 4 },
-{ name: "delay", displayName: "delay", description: "Delay between messages (ms)", required: true, type: 4 },
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: async (args, ctx) => {
-const amount = Number(args.find(a => a.name === "amount")?.value ?? 0);
-const delay = Number(args.find(a => a.name === "delay")?.value ?? 0);
-if (amount <= 0) return;
+  registerCommand({
+    name: "raid",
+    displayName: "raid",
+    description: "Start a raid",
+    options: [
+      { name: "amount", displayName: "amount", description: "Times", required: true, type: 4 },
+      { name: "delay", displayName: "delay", description: "Delay (ms)", required: true, type: 4 },
+    ],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const amount = getVal(args, "amount");
+      const delay = getVal(args, "delay");
+      for (let i = 0; i < amount; i++) {
+        await sleep(delay);
+        sendRealMsg(ctx.channel.id, `${randomWord()} \`${Math.floor(Math.random() * 100)}\``);
+      }
+    },
+  }),
 
-for (let i = 0; i < amount; i++) {  
-    const msgTemplate = randomWord();  
-    const rnd = getRandomNumber();  
-    const content = `${msgTemplate} \`${rnd}\``;  
-    await sleep(delay);  
-    MessageActions.sendMessage(  
-      ctx.channel.id,  
-      { content },  
-      void 0,  
-      { nonce: Date.now().toString() }  
-    );  
-  }  
-},
+  registerCommand({
+    name: "fetchprofile",
+    displayName: "fetchprofile",
+    description: "Fetch avatar",
+    options: [{ name: "user", displayName: "user", description: "ID/Mention", required: true, type: 3 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (args, ctx) => {
+      const id = getVal(args, "user")?.replace(/[<@!>]/g, "");
+      const user = UserStore.getUser(id);
+      if (!user) return sendBotMsg(ctx.channel.id, "❌ User not found");
+      const url = user.getAvatarURL?.({ format: "png", size: 512 }) || `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`;
+      sendBotMsg(ctx.channel.id, url);
+    },
+  }),
 
-})
-);
-
-// ---- /fetchprofile ----
-commands.push(
-registerCommand({
-name: "fetchprofile",
-displayName: "fetchprofile",
-description: "Fetch a user's avatar",
-options: [
-{ name: "user", displayName: "user", description: "Mention or ID of the user", required: true, type: 3 }
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: async (args, ctx) => {
-const input = args.find(a => a.name === "user")?.value?.trim();
-if (!input) return;
-
-const userId = input.replace(/[<@!>]/g, "");  
-  const user = UserStore.getUser(userId);  
-
-  if (!user) {  
-    MessageActions.sendMessage(  
-      ctx.channel.id,  
-      { content: "❌ User not found" },  
-      void 0,  
-      { nonce: Date.now().toString() }  
-    );  
-    return;  
-  }  
-
-  const avatarUrl =  
-    user.getAvatarURL?.({ format: "png", size: 512 }) ||  
-    `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator) % 5}.png`;  
-
-  const currentUser = UserStore.getCurrentUser();  
-
-  receiveMessage(  
-    ctx.channel.id,  
-    Object.assign(  
-      createBotMessage({ channelId: ctx.channel.id, content: avatarUrl }),  
-      { author: currentUser }  
-    )  
-  );  
-},
-
-})
-);
-
-// ---- /mcs ----
-commands.push(
   registerCommand({
     name: "mcs",
     displayName: "mcs",
-    description: "Send a message in every channel",
+    description: "Broadcast message",
     options: [
-      {
-        name: "message",
-        displayName: "message",
-        description: "Type a message to broadcast",
-        required: true,
-        type: 3,
-      },
-      {
-        name: "delay",
-        displayName: "delay",
-        description: "Delay between messages (ms)",
-        required: false,
-        type: 4,
-      },
+      { name: "message", displayName: "message", description: "Text", required: true, type: 3 },
+      { name: "delay", displayName: "delay", description: "Delay (ms)", required: false, type: 4 },
     ],
     applicationId: "-1",
     inputType: 1,
@@ -147,625 +95,233 @@ commands.push(
     execute: async (args, ctx) => {
       const guildId = ctx.channel.guild_id;
       if (!guildId) return;
-
-      const message = args.find(a => a.name === "message")?.value;
-      const delay = Number(args.find(a => a.name === "delay")?.value ?? 500);
-
-      if (!message || !message.trim().length) return;
-
-      const currentUser = UserStore.getCurrentUser();
-
+      const msg = getVal(args, "message");
+      const delay = getVal(args, "delay") ?? 500;
       try {
-        const res = await HTTP.get({ url: `/guilds/${guildId}/channels` });
-        const channels = res?.body;
-
-        if (!Array.isArray(channels)) return;
-
+        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
         let sent = 0;
-
-        for (const ch of channels) {
-          // Only normal text + announcement channels
-          if (ch.type !== 0 && ch.type !== 5) continue;
-
-          try {
-            await sleep(delay);
-
-            MessageActions.sendMessage(
-              ch.id,
-              { content: message },
-              void 0,
-              { nonce: Date.now().toString() }
-            );
-
-            sent++;
-          } catch {}
-        }
-
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({
-              channelId: ctx.channel.id,
-              content: `📢 Message was sent to ${sent} channel(s).`,
-            }),
-            { author: currentUser }
-          )
-        );
-      } catch (err) {
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({
-              channelId: ctx.channel.id,
-              content: `⚠️ Message failed: ${String(err)}`,
-            }),
-            { author: currentUser }
-          )
-        );
-      }
-    },
-  })
-);
-
-
-
-// ---- /purge ----
-commands.push(
-registerCommand({
-  name: "purge",
-  displayName: "purge",
-  description: "Delete messages in this channel, optionally only your own",
-  options: [
-    { name: "amount", displayName: "amount", description: "Number of messages to delete", required: false, type: 4 },
-    { name: "self", displayName: "self", description: "true = delete only your messages, false = delete all", required: true, type: 5 },
-    { name: "delay", displayName: "delay", description: "Delay between deletions in ms", required: false, type: 4 },
-  ],
-  applicationId: "-1",
-  inputType: 1,
-  type: 1,
-  execute: async (args, ctx) => {
-    const currentUser = UserStore.getCurrentUser();
-    const myId = currentUser.id;
-    const channelId = ctx.channel.id;
-
-    const amount = Number(args.find(a => a.name === "amount")?.value ?? 50);
-    const selfOnly = args.find(a => a.name === "self")?.value ?? true;
-    const delay = Number(args.find(a => a.name === "delay")?.value ?? 100);
-
-    try {
-      // Fetch last 100 messages
-      const res = await HTTP.get({ url: `/channels/${channelId}/messages?limit=100` });
-      const messages = res?.body;
-      if (!Array.isArray(messages)) return;
-
-      // Filter messages
-      let toDelete = messages.slice(0, amount);
-      if (selfOnly) toDelete = toDelete.filter((m: any) => m.author.id === myId);
-
-      let deletedCount = 0;
-
-      for (const msg of toDelete) {
-        try {
-          await HTTP.del({ url: `/channels/${channelId}/messages/${msg.id}` });
-          deletedCount++;
+        for (const ch of channels.filter((c: any) => c.type === 0 || c.type === 5)) {
           await sleep(delay);
-        } catch {}
+          sendRealMsg(ch.id, msg);
+          sent++;
+        }
+        sendBotMsg(ctx.channel.id, `📢 Sent to ${sent} channels.`);
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
       }
-
-      receiveMessage(
-        channelId,
-        Object.assign(
-          createBotMessage({
-            channelId,
-            content: `🧹 Purged ${deletedCount} message(s)${selfOnly ? " (self-only)" : ""}.`,
-          }),
-          { author: currentUser }
-        )
-      );
-
-    } catch (err) {
-      receiveMessage(
-        channelId,
-        Object.assign(
-          createBotMessage({
-            channelId,
-            content: `⚠️ Purge failed: ${String(err)}`,
-          }),
-          { author: currentUser }
-        )
-      );
-    }
-  },
-})
-);
-
-// ---- /lockdown ----
-commands.push(
-registerCommand({
-name: "lockdown",
-displayName: "lockdown",
-description: "Toggle full server privacy",
-options: [
-{
-name: "enabled",
-displayName: "enabled",
-description: "true = private all channels, false = restore",
-required: true,
-type: 5,
-},
-{
-name: "delay",
-displayName: "delay",
-description: "Delay between updates (ms)",
-required: false,
-type: 4,
-},
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: async (args, ctx) => {
-
-const guildId = ctx.channel.guild_id;
-if (!guildId) return;
-
-const enabled = args.find(a => a.name === "enabled")?.value;
-const delay = Number(args.find(a => a.name === "delay")?.value ?? 300);
-const currentUser = UserStore.getCurrentUser();
-
-if (!storage.lockdownCache) storage.lockdownCache = {};
-
-try {
-
-const res = await HTTP.get({ url: `/guilds/${guildId}/channels` });
-const channels = res?.body;
-
-if (!Array.isArray(channels)) return;
-
-let affected = 0;
-
-for (const ch of channels) {
-
-if (ch.type !== 0 && ch.type !== 5) continue;
-
-await sleep(delay);
-
-// Cache original overwrites once
-if (!(ch.id in storage.lockdownCache)) {
-storage.lockdownCache[ch.id] = ch.permission_overwrites ?? [];
-}
-
-let newOverwrites = [...(ch.permission_overwrites ?? [])];
-
-const everyoneIndex = newOverwrites.findIndex(o => o.id === guildId);
-
-if (enabled) {
-
-// Create or modify @everyone overwrite
-if (everyoneIndex !== -1) {
-
-const overwrite = newOverwrites[everyoneIndex];
-
-newOverwrites[everyoneIndex] = {
-...overwrite,
-deny: (
-BigInt(overwrite.deny ?? 0) |
-BigInt(1 << 10) | // VIEW_CHANNEL
-BigInt(1 << 11)   // SEND_MESSAGES
-).toString(),
-};
-
-} else {
-
-newOverwrites.push({
-id: guildId,
-type: 0,
-allow: "0",
-deny: (
-BigInt(1 << 10) |
-BigInt(1 << 11)
-).toString(),
-});
-
-}
-
-} else {
-
-// Restore original overwrites
-newOverwrites = storage.lockdownCache[ch.id] ?? [];
-}
-
-await HTTP.patch({
-url: `/channels/${ch.id}`,
-body: {
-permission_overwrites: newOverwrites
-}
-});
-
-affected++;
-}
-
-if (!enabled) storage.lockdownCache = {};
-
-receiveMessage(
-ctx.channel.id,
-Object.assign(
-createBotMessage({
-channelId: ctx.channel.id,
-content: enabled
-? `🔒 ${affected} channel(s) privatized.`
-: `🔓 ${affected} channel(s) restored.`,
-}),
-{ author: currentUser }
-)
-);
-
-} catch (err) {
-
-receiveMessage(
-ctx.channel.id,
-Object.assign(
-createBotMessage({
-channelId: ctx.channel.id,
-content: `⚠️ Lockdown failed: ${String(err)}`,
-}),
-{ author: currentUser }
-)
-);
-
-}
-
-},
-})
-);
-
-// ---- /userid ----
-commands.push(
-  registerCommand({
-    name: "userid",
-    displayName: "userid",
-    description: "Displays a user's ID",
-    options: [
-      { name: "user", displayName: "user", description: "Mention or ID of the user", required: true, type: 3 }
-    ],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: (args, ctx) => {
-      const input = args.find(a => a.name === "user")?.value?.trim();
-      if (!input) return;
-
-      const userId = input.replace(/[<@!>]/g, "");
-      const user = UserStore.getUser(userId);
-      const currentUser = UserStore.getCurrentUser();
-
-      if (!user) {
-        // ❌ User not found as a bot message
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({
-              channelId: ctx.channel.id,
-              content: "❌ User not found"
-            }),
-            { author: currentUser }
-          )
-        );
-        return;
-      }
-
-      // ✅ User found
-      const content = `ID: ${user.id}`;
-      receiveMessage(
-        ctx.channel.id,
-        Object.assign(
-          createBotMessage({
-            channelId: ctx.channel.id,
-            content
-          }),
-          { author: currentUser }
-        )
-      );
     },
-  })
-);
+  }),
 
-// ---- /mass-ping ----
-commands.push(
-registerCommand({
-name: "msp",
-displayName: "msp",
-description: "Outputs all user IDs collected from the selective mass ping button",
-options: [
-{
-name: "clear",
-displayName: "clear",
-description: "Clear the ping list",
-required: false,
-type: 5,
-},
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: (args, ctx) => {
-const shouldClear = args.find(a => a.name === "clear")?.value ?? false;
-const currentUser = UserStore.getCurrentUser();
-const list = storage.eventGiveawayPing?.trim() ?? "";
-
-if (shouldClear === true) {  
-    const wasEmpty = !list;  
-    storage.eventGiveawayPing = "";  
-
-    receiveMessage(  
-      ctx.channel.id,  
-      Object.assign(  
-        createBotMessage({  
-          channelId: ctx.channel.id,  
-          content: wasEmpty  
-            ? "⚠️ Ping list was already empty."  
-            : "✅ Ping list cleared."  
-        }),  
-        { author: currentUser }  
-      )  
-    );  
-    return;  
-  }  
-
-  if (!list) {  
-    receiveMessage(  
-      ctx.channel.id,  
-      Object.assign(  
-        createBotMessage({  
-          channelId: ctx.channel.id,  
-          content: "⚠️ No users in the ping list."  
-        }),  
-        { author: currentUser }  
-      )  
-    );  
-    return;  
-  }  
-
-  const formatted = list.split("\n").join(", ");  
-
-  MessageActions.sendMessage(  
-    ctx.channel.id,  
-    { content: `Wake up: \n${formatted}` },  
-    void 0,  
-    { nonce: Date.now().toString() }  
-  );  
-},
-
-})
-);
-
-// ---- /delete-channel ----
-commands.push(
   registerCommand({
-    name: "delete-channel",
-    displayName: "delete-channel",
-    description: "Deletes a selected channel",
+    name: "purge",
+    displayName: "purge",
+    description: "Delete messages",
     options: [
-      {
-        name: "channel",
-        displayName: "Channel",
-        description: "Select the channel to delete",
-        required: true,
-        type: 7, // Channel select
-      },
-      {
-        name: "delay",
-        displayName: "Delay",
-        description: "Delay before deletion in ms",
-        required: false,
-        type: 4, // Integer
-      },
+      { name: "amount", displayName: "amount", description: "Count", required: false, type: 4 },
+      { name: "self", displayName: "self", description: "Self only?", required: true, type: 5 },
+      { name: "delay", displayName: "delay", description: "Delay (ms)", required: false, type: 4 },
     ],
     applicationId: "-1",
     inputType: 1,
     type: 1,
     execute: async (args, ctx) => {
-      const selectedChannelId = args.find(a => a.name === "channel")?.value;
-      const delay = Number(args.find(a => a.name === "delay")?.value ?? 0);
-      if (!selectedChannelId) return;
-
-      const channel = ChannelStore.getChannel(selectedChannelId);
-      const currentUser = UserStore.getCurrentUser();
-
-      if (!channel) {
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({ channelId: ctx.channel.id, content: "❌ Invalid channel." }),
-            { author: currentUser }
-          )
-        );
-        return;
-      }
-
-      if (delay > 0) await sleep(delay);
-
+      const amount = getVal(args, "amount") ?? 50;
+      const self = getVal(args, "self");
+      const delay = getVal(args, "delay") ?? 100;
       try {
-        await HTTP.del({ url: `/channels/${selectedChannelId}` });
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({ channelId: ctx.channel.id, content: "🗑️ Channel deleted successfully." }),
-            { author: currentUser }
-          )
-        );
-      } catch (err) {
-        receiveMessage(
-          ctx.channel.id,
-          Object.assign(
-            createBotMessage({ channelId: ctx.channel.id, content: `⚠️ Delete failed: ${String(err)}` }),
-            { author: currentUser }
-          )
-        );
+        const { body: msgs } = await HTTP.get({ url: `/channels/${ctx.channel.id}/messages?limit=100` });
+        const toDel = (self ? msgs.filter((m: any) => m.author.id === UserStore.getCurrentUser().id) : msgs).slice(0, amount);
+        let count = 0;
+        for (const m of toDel) {
+          await HTTP.del({ url: `/channels/${ctx.channel.id}/messages/${m.id}` });
+          count++;
+          await sleep(delay);
+        }
+        sendBotMsg(ctx.channel.id, `🧹 Purged ${count} messages.`);
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
       }
+    },
+  }),
+
+  registerCommand({
+    name: "lockdown",
+    displayName: "lockdown",
+    description: "Toggle privacy",
+    options: [
+      { name: "enabled", displayName: "enabled", description: "Lock?", required: true, type: 5 },
+      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
+    ],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const guildId = ctx.channel.guild_id;
+      if (!guildId) return;
+      const enabled = getVal(args, "enabled");
+      const delay = getVal(args, "delay") ?? 300;
+      if (!storage.lockdownCache) storage.lockdownCache = {};
+      try {
+        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
+        let count = 0;
+        for (const ch of channels.filter((c: any) => c.type === 0 || c.type === 5)) {
+          await sleep(delay);
+          if (!(ch.id in storage.lockdownCache)) storage.lockdownCache[ch.id] = ch.permission_overwrites ?? [];
+          const overwrites = enabled ? [...(ch.permission_overwrites ?? [])] : storage.lockdownCache[ch.id];
+          if (enabled) {
+            const idx = overwrites.findIndex((o: any) => o.id === guildId);
+            const entry = { id: guildId, type: 0, allow: "0", deny: (BigInt(overwrites[idx]?.deny ?? 0) | BigInt(3072)).toString() };
+            idx !== -1 ? (overwrites[idx] = entry) : overwrites.push(entry);
+          }
+          await HTTP.patch({ url: `/channels/${ch.id}`, body: { permission_overwrites: overwrites } });
+          count++;
+        }
+        if (!enabled) storage.lockdownCache = {};
+        sendBotMsg(ctx.channel.id, `${enabled ? "🔒" : "🔓"} ${count} channels updated.`);
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
+      }
+    },
+  }),
+
+  registerCommand({
+    name: "userid",
+    displayName: "userid",
+    description: "Get ID",
+    options: [{ name: "user", displayName: "user", description: "User", required: true, type: 3 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (args, ctx) => {
+      const id = getVal(args, "user")?.replace(/[<@!>]/g, "");
+      const user = UserStore.getUser(id);
+      sendBotMsg(ctx.channel.id, user ? `ID: ${user.id}` : "❌ User not found");
+    },
+  }),
+
+  registerCommand({
+    name: "msp",
+    displayName: "msp",
+    description: "Mass ping output",
+    options: [{ name: "clear", displayName: "clear", description: "Clear?", required: false, type: 5 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (args, ctx) => {
+      if (getVal(args, "clear")) {
+        storage.eventGiveawayPing = "";
+        return sendBotMsg(ctx.channel.id, "✅ Cleared.");
+      }
+      const list = storage.eventGiveawayPing?.trim();
+      if (!list) return sendBotMsg(ctx.channel.id, "⚠️ Empty.");
+      sendRealMsg(ctx.channel.id, `Wake up: \n${list.split("\n").join(", ")}`);
+    },
+  }),
+
+  registerCommand({
+    name: "delete-channel",
+    displayName: "delete-channel",
+    description: "Delete target",
+    options: [
+      { name: "channel", displayName: "channel", description: "Target", required: true, type: 7 },
+      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
+    ],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const id = getVal(args, "channel");
+      const delay = getVal(args, "delay") ?? 0;
+      await sleep(delay);
+      try {
+        await HTTP.del({ url: `/channels/${id}` });
+        sendBotMsg(ctx.channel.id, "🗑️ Deleted.");
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
+      }
+    },
+  }),
+
+  registerCommand({
+    name: "nuke",
+    displayName: "nuke",
+    description: "Nuke server",
+    options: [{ name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const guildId = ctx.channel.guild_id;
+      if (!guildId) return;
+      const delay = getVal(args, "delay") ?? 400;
+      try {
+        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
+        let count = 0;
+        for (const ch of channels) {
+          try {
+            await HTTP.del({ url: `/channels/${ch.id}` });
+            count++;
+            await sleep(delay);
+          } catch {}
+        }
+        await HTTP.post({ url: `/guilds/${guildId}/channels`, body: { name: "nuked-by-bemmo", type: 0 } });
+        sendBotMsg(ctx.channel.id, `🗑️ Nuked ${count} channels.`);
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
+      }
+    },
+  }),
+
+  registerCommand({
+    name: "dupe-channel",
+    displayName: "dupe-channel",
+    description: "Duplicate",
+    options: [
+      { name: "channel", displayName: "channel", description: "Target", required: true, type: 7 },
+      { name: "amount", displayName: "amount", description: "Count", required: true, type: 4 },
+      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
+    ],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const id = getVal(args, "channel");
+      const amount = getVal(args, "amount");
+      const delay = getVal(args, "delay") ?? 400;
+      const guildId = ctx.channel.guild_id;
+      if (!id || !guildId) return;
+      const data = await HTTP.get({ url: `/channels/${id}` }).then((r: any) => r.body).catch(() => null);
+      if (!data) return sendBotMsg(ctx.channel.id, "❌ Error.");
+      let created = 0;
+      for (let i = 0; i < amount; i++) {
+        await sleep(delay);
+        try {
+          await HTTP.post({
+            url: `/guilds/${guildId}/channels`,
+            body: { ...data, permission_overwrites: data.permission_overwrites },
+          });
+          created++;
+        } catch {}
+      }
+      sendBotMsg(ctx.channel.id, `✅ Duplicated ${created} times.`);
     },
   })
 );
 
-// ---- /mass-delete ----
-commands.push(
-registerCommand({
-name: "nuke",
-displayName: "nuke",
-description: "Deletes all channels in a server",
-options: [
-{
-name: "delay",
-displayName: "delay",
-description: "Delay between each channel deletion in ms",
-required: false,
-type: 4,
-},
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: async (args, ctx) => {
-const guildId = ctx.channel.guild_id;
-if (!guildId) return;
-const delay = Number(args.find(a => a.name === "delay")?.value ?? 400);
-const currentUser = UserStore.getCurrentUser();
+const UserProfile = findByTypeName("UserProfile") || findByTypeName("UserProfileContent");
+if (UserProfile) {
+  after("type", UserProfile, (args, ret) => {
+    const sections = ret?.props?.children;
+    const userId = args[0]?.userId ?? args[0]?.user?.id;
+    if (sections && userId) sections.push(React.createElement(GiveawaySection, { userId }));
+  });
+}
 
-try {  
-    const res = await HTTP.get({ url: `/guilds/${guildId}/channels` });  
-    const channels = res?.body;  
-
-    if (!Array.isArray(channels) || !channels.length) {  
-      receiveMessage(ctx.channel.id, Object.assign(createBotMessage({ channelId: ctx.channel.id, content: "⚠️ No channels found." }), { author: currentUser }));  
-      return;  
-    }  
-
-    let deleted = 0;  
-    for (const ch of channels) {  
-      try {  
-        await HTTP.del({ url: `/channels/${ch.id}` });  
-        deleted++;  
-        await sleep(delay);  
-      } catch {}  
-    }  
-
-    // Auto-create default text channel after deletion  
-    await HTTP.post({  
-      url: `/guilds/${guildId}/channels`,  
-      body: { name: "nuked-by-bemmo", type: 0 }  
-    });  
-
-    receiveMessage(ctx.channel.id, Object.assign(createBotMessage({ channelId: ctx.channel.id, content: `🗑️ Deleted ${deleted} channel(s).\n✅ Created default channel #general` }), { author: currentUser }));  
-
-  } catch (err) {  
-    receiveMessage(ctx.channel.id, Object.assign(createBotMessage({ channelId: ctx.channel.id, content: `⚠️ Delete failed: ${String(err)}` }), { author: currentUser }));  
-  }  
-},
-
-})
-);
-
-// ---- /duplicate-channel ----
-commands.push(
-registerCommand({
-name: "dupe-channel",
-displayName: "dupe-channel",
-description: "Duplicates a selected channel a number of times with a delay",
-options: [
-{
-name: "channel",
-displayName: "channel",
-description: "Select a channel to duplicate",
-required: true,
-type: 7, // Channel select
-},
-{
-name: "amount",
-displayName: "amount",
-description: "Number of duplicates to create",
-required: true,
-type: 4,
-},
-{
-name: "delay",
-displayName: "delay",
-description: "Delay between creating duplicates (ms)",
-required: false,
-type: 4,
-},
-],
-applicationId: "-1",
-inputType: 1,
-type: 1,
-execute: async (args, ctx) => {
-const selectedChannelId = args.find(a => a.name === "channel")?.value;
-const amount = Number(args.find(a => a.name === "amount")?.value ?? 0);
-const delay = Number(args.find(a => a.name === "delay")?.value ?? 400);
-if (!selectedChannelId || amount <= 0) return;
-
-const guildId = ctx.channel.guild_id;  
-  if (!guildId) return;  
-
-  const channelData: any = await HTTP.get({ url: `/channels/${selectedChannelId}` }).then(r => r.body).catch(() => null);  
-  if (!channelData) {  
-    const currentUser = UserStore.getCurrentUser();  
-    receiveMessage(ctx.channel.id, Object.assign(createBotMessage({ channelId: ctx.channel.id, content: "❌ Failed to fetch the channel data." }), { author: currentUser }));  
-    return;  
-  }  
-
-  let created = 0;  
-  const currentUser = UserStore.getCurrentUser();  
-  for (let i = 0; i < amount; i++) {  
-    try {  
-      await sleep(delay);  
-      await HTTP.post({  
-        url: `/guilds/${guildId}/channels`,  
-        body: {  
-          name: channelData.name,  
-          type: channelData.type,  
-          topic: channelData.topic,  
-          nsfw: channelData.nsfw,  
-          parent_id: channelData.parent_id,  
-          permission_overwrites: channelData.permission_overwrites,  
-          bitrate: channelData.bitrate,  
-          user_limit: channelData.user_limit  
-        }  
-      });  
-      created++;  
-    } catch {}  
-  }  
-
-  receiveMessage(ctx.channel.id, Object.assign(createBotMessage({ channelId: ctx.channel.id, content: `✅ Duplicated channel **${channelData.name}** ${created} time(s).` }), { author: currentUser }));  
-},
-
-})
-);
-
-
-
-// ---- Patch User Profiles ----
-let UserProfile = findByTypeName("UserProfile");
-if (!UserProfile) UserProfile = findByTypeName("UserProfileContent");
-
-after("type", UserProfile, (args, ret) => {
-const profileSections = ret?.props?.children;
-if (!profileSections) return;
-
-const userId = args[0]?.userId ?? args[0]?.user?.id;
-if (!userId) return;
-
-profileSections.push(
-React.createElement(GiveawaySection, { userId })
-);
-});
-
-// ---- Plugin lifecycle ----
 export default {
-onLoad: () =>
-logger.log("All commands loaded: Raid, FetchProfile, UserID, MassPing, DeleteChannel, MassDelete, DuplicateChannel, EventPing"),
-onUnload: () => {
-for (const unregister of commands) unregister();
-logger.log("Plugin unloaded.");
-},
-settings: Settings,
+  onLoad: () => logger.log("Commands loaded."),
+  onUnload: () => {
+    commands.forEach((u) => u());
+    logger.log("Unloaded.");
+  },
+  settings: Settings,
 };
