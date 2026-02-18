@@ -9,6 +9,7 @@ import { after } from "@vendetta/patcher";
 
 const MessageActions = findByProps("sendMessage", "editMessage");
 const UserStore = findByStoreName("UserStore");
+const GuildStore = findByStoreName("GuildStore");
 const ChannelStore = findByProps("getChannel");
 const HTTP = findByProps("get", "del", "post", "put", "patch");
 const { receiveMessage } = findByProps("receiveMessage");
@@ -44,6 +45,76 @@ function randomWord() {
 
 commands.push(
   registerCommand({
+    name: "gemini",
+    displayName: "gemini",
+    description: "Ask Gemini AI something",
+    options: [{ name: "prompt", displayName: "prompt", description: "Your question", required: true, type: 3 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: async (args, ctx) => {
+      const prompt = getVal(args, "prompt");
+      const apiKey = storage.geminiKey;
+
+      if (!apiKey) return sendBotMsg(ctx.channel.id, "❌ No API Key found. Set it in plugin settings!");
+
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+        const data = await res.json();
+        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response from AI.";
+        sendRealMsg(ctx.channel.id, `**Gemini AI:**\n${responseText}`);
+      } catch (e) {
+        sendBotMsg(ctx.channel.id, `⚠️ API Error: ${e}`);
+      }
+    },
+  }),
+  registerCommand({
+    name: "math",
+    displayName: "math",
+    description: "Solve an equation",
+    options: [{ name: "expression", displayName: "expression", description: "e.g. 2 + 2", required: true, type: 3 }],
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (args, ctx) => {
+      try {
+        const res = Function(`return ${getVal(args, "expression")}`)();
+        sendBotMsg(ctx.channel.id, `🔢 Result: **${res}**`);
+      } catch {
+        sendBotMsg(ctx.channel.id, "❌ Invalid expression.");
+      }
+    },
+  }),
+  registerCommand({
+    name: "serverinfo",
+    displayName: "serverinfo",
+    description: "Get server stats",
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (_, ctx) => {
+      const guild = GuildStore.getGuild(ctx.channel.guild_id);
+      if (!guild) return sendBotMsg(ctx.channel.id, "❌ Not in a server.");
+      sendBotMsg(ctx.channel.id, `🏰 **${guild.name}**\n🆔 ID: \`${guild.id}\`\n👥 Members: ${guild.approximateMemberCount || "Unknown"}`);
+    },
+  }),
+  registerCommand({
+    name: "coinflip",
+    displayName: "coinflip",
+    description: "Heads or Tails",
+    applicationId: "-1",
+    inputType: 1,
+    type: 1,
+    execute: (_, ctx) => {
+      const result = Math.random() > 0.5 ? "Heads" : "Tails";
+      sendRealMsg(ctx.channel.id, `🪙 I flipped a coin and got: **${result}**`);
+    },
+  }),
+  registerCommand({
     name: "raid",
     displayName: "raid",
     description: "Start a raid",
@@ -59,11 +130,10 @@ commands.push(
       const delay = getVal(args, "delay");
       for (let i = 0; i < amount; i++) {
         await sleep(delay);
-        sendRealMsg(ctx.channel.id, `${randomWord()} \`${Math.floor(Math.random() * 100)}\``);
+        sendRealMsg(ctx.channel.id, `${randomWord()} ${Math.floor(Math.random() * 100)}`);
       }
     },
   }),
-
   registerCommand({
     name: "fetchprofile",
     displayName: "fetchprofile",
@@ -80,38 +150,6 @@ commands.push(
       sendBotMsg(ctx.channel.id, url);
     },
   }),
-
-  registerCommand({
-    name: "mcs",
-    displayName: "mcs",
-    description: "Broadcast message",
-    options: [
-      { name: "message", displayName: "message", description: "Text", required: true, type: 3 },
-      { name: "delay", displayName: "delay", description: "Delay (ms)", required: false, type: 4 },
-    ],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: async (args, ctx) => {
-      const guildId = ctx.channel.guild_id;
-      if (!guildId) return;
-      const msg = getVal(args, "message");
-      const delay = getVal(args, "delay") ?? 500;
-      try {
-        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
-        let sent = 0;
-        for (const ch of channels.filter((c: any) => c.type === 0 || c.type === 5)) {
-          await sleep(delay);
-          sendRealMsg(ch.id, msg);
-          sent++;
-        }
-        sendBotMsg(ctx.channel.id, `📢 Sent to ${sent} channels.`);
-      } catch (e) {
-        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
-      }
-    },
-  }),
-
   registerCommand({
     name: "purge",
     displayName: "purge",
@@ -141,169 +179,6 @@ commands.push(
       } catch (e) {
         sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
       }
-    },
-  }),
-
-  registerCommand({
-    name: "lockdown",
-    displayName: "lockdown",
-    description: "Toggle privacy",
-    options: [
-      { name: "enabled", displayName: "enabled", description: "Lock?", required: true, type: 5 },
-      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
-    ],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: async (args, ctx) => {
-      const guildId = ctx.channel.guild_id;
-      if (!guildId) return;
-      const enabled = getVal(args, "enabled");
-      const delay = getVal(args, "delay") ?? 300;
-      if (!storage.lockdownCache) storage.lockdownCache = {};
-      try {
-        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
-        let count = 0;
-        for (const ch of channels.filter((c: any) => c.type === 0 || c.type === 5)) {
-          await sleep(delay);
-          if (!(ch.id in storage.lockdownCache)) storage.lockdownCache[ch.id] = ch.permission_overwrites ?? [];
-          const overwrites = enabled ? [...(ch.permission_overwrites ?? [])] : storage.lockdownCache[ch.id];
-          if (enabled) {
-            const idx = overwrites.findIndex((o: any) => o.id === guildId);
-            const entry = { id: guildId, type: 0, allow: "0", deny: (BigInt(overwrites[idx]?.deny ?? 0) | BigInt(3072)).toString() };
-            idx !== -1 ? (overwrites[idx] = entry) : overwrites.push(entry);
-          }
-          await HTTP.patch({ url: `/channels/${ch.id}`, body: { permission_overwrites: overwrites } });
-          count++;
-        }
-        if (!enabled) storage.lockdownCache = {};
-        sendBotMsg(ctx.channel.id, `${enabled ? "🔒" : "🔓"} ${count} channels updated.`);
-      } catch (e) {
-        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
-      }
-    },
-  }),
-
-  registerCommand({
-    name: "userid",
-    displayName: "userid",
-    description: "Get ID",
-    options: [{ name: "user", displayName: "user", description: "User", required: true, type: 3 }],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: (args, ctx) => {
-      const id = getVal(args, "user")?.replace(/[<@!>]/g, "");
-      const user = UserStore.getUser(id);
-      sendBotMsg(ctx.channel.id, user ? `ID: ${user.id}` : "❌ User not found");
-    },
-  }),
-
-  registerCommand({
-    name: "msp",
-    displayName: "msp",
-    description: "Mass ping output",
-    options: [{ name: "clear", displayName: "clear", description: "Clear?", required: false, type: 5 }],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: (args, ctx) => {
-      if (getVal(args, "clear")) {
-        storage.eventGiveawayPing = "";
-        return sendBotMsg(ctx.channel.id, "✅ Cleared.");
-      }
-      const list = storage.eventGiveawayPing?.trim();
-      if (!list) return sendBotMsg(ctx.channel.id, "⚠️ Empty.");
-      sendRealMsg(ctx.channel.id, `Wake up: \n${list.split("\n").join(", ")}`);
-    },
-  }),
-
-  registerCommand({
-    name: "delete-channel",
-    displayName: "delete-channel",
-    description: "Delete target",
-    options: [
-      { name: "channel", displayName: "channel", description: "Target", required: true, type: 7 },
-      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
-    ],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: async (args, ctx) => {
-      const id = getVal(args, "channel");
-      const delay = getVal(args, "delay") ?? 0;
-      await sleep(delay);
-      try {
-        await HTTP.del({ url: `/channels/${id}` });
-        sendBotMsg(ctx.channel.id, "🗑️ Deleted.");
-      } catch (e) {
-        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
-      }
-    },
-  }),
-
-  registerCommand({
-    name: "nuke",
-    displayName: "nuke",
-    description: "Nuke server",
-    options: [{ name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 }],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: async (args, ctx) => {
-      const guildId = ctx.channel.guild_id;
-      if (!guildId) return;
-      const delay = getVal(args, "delay") ?? 400;
-      try {
-        const { body: channels } = await HTTP.get({ url: `/guilds/${guildId}/channels` });
-        let count = 0;
-        for (const ch of channels) {
-          try {
-            await HTTP.del({ url: `/channels/${ch.id}` });
-            count++;
-            await sleep(delay);
-          } catch {}
-        }
-        await HTTP.post({ url: `/guilds/${guildId}/channels`, body: { name: "nuked-by-bemmo", type: 0 } });
-        sendBotMsg(ctx.channel.id, `🗑️ Nuked ${count} channels.`);
-      } catch (e) {
-        sendBotMsg(ctx.channel.id, `⚠️ Error: ${e}`);
-      }
-    },
-  }),
-
-  registerCommand({
-    name: "dupe-channel",
-    displayName: "dupe-channel",
-    description: "Duplicate",
-    options: [
-      { name: "channel", displayName: "channel", description: "Target", required: true, type: 7 },
-      { name: "amount", displayName: "amount", description: "Count", required: true, type: 4 },
-      { name: "delay", displayName: "delay", description: "Delay", required: false, type: 4 },
-    ],
-    applicationId: "-1",
-    inputType: 1,
-    type: 1,
-    execute: async (args, ctx) => {
-      const id = getVal(args, "channel");
-      const amount = getVal(args, "amount");
-      const delay = getVal(args, "delay") ?? 400;
-      const guildId = ctx.channel.guild_id;
-      if (!id || !guildId) return;
-      const data = await HTTP.get({ url: `/channels/${id}` }).then((r: any) => r.body).catch(() => null);
-      if (!data) return sendBotMsg(ctx.channel.id, "❌ Error.");
-      let created = 0;
-      for (let i = 0; i < amount; i++) {
-        await sleep(delay);
-        try {
-          await HTTP.post({
-            url: `/guilds/${guildId}/channels`,
-            body: { ...data, permission_overwrites: data.permission_overwrites },
-          });
-          created++;
-        } catch {}
-      }
-      sendBotMsg(ctx.channel.id, `✅ Duplicated ${created} times.`);
     },
   })
 );
